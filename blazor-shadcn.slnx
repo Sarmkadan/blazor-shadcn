@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/blazor-shadcn/">
+    <Project Path="src/blazor-shadcn/BlazorShadcn.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/blazor-shadcn.Tests/">
+    <Project Path="tests/blazor-shadcn.Tests/BlazorShadcn.Tests.csproj" />
+  </Folder>
+</Solution>
