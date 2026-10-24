@@ -1,3 +1,5 @@
+using System.Collections;
+
 namespace BlazorShadcn.Utils;
 
 /// <summary>
@@ -28,7 +30,35 @@ public static class ClassNames
     /// </code>
     /// </example>
     public static string Cn(params object?[] inputs)
-        => throw new NotImplementedException();
+    {
+        var tokens = new List<string>();
+        Collect(inputs, tokens);
+        return tokens.Count == 0 ? string.Empty : TwMerge(string.Join(' ', tokens));
+    }
+
+    /// <summary>
+    /// Recursively flattens one clsx-style input into whitespace-separated class tokens.
+    /// </summary>
+    private static void Collect(object? input, List<string> tokens)
+    {
+        switch (input)
+        {
+            case null or bool:
+                return;
+            case string text:
+                tokens.AddRange(text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+                return;
+            case IEnumerable items:
+                foreach (var item in items)
+                {
+                    Collect(item, tokens);
+                }
+                return;
+            default:
+                Collect(input.ToString(), tokens);
+                return;
+        }
+    }
 
     /// <summary>
     /// Resolves Tailwind utility conflicts in an already-joined class string. The last occurrence
@@ -37,5 +67,19 @@ public static class ClassNames
     /// <param name="classes">A space-separated class string.</param>
     /// <returns>The class string with earlier conflicting utilities removed.</returns>
     public static string TwMerge(string classes)
-        => throw new NotImplementedException();
+    {
+        // TEMPORARY: exact-duplicate removal only (last occurrence kept). Replace with the full tailwind-merge port.
+        var tokens = classes.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var kept = new List<string>(tokens.Length);
+        for (var i = tokens.Length - 1; i >= 0; i--)
+        {
+            if (seen.Add(tokens[i]))
+            {
+                kept.Add(tokens[i]);
+            }
+        }
+        kept.Reverse();
+        return string.Join(' ', kept);
+    }
 }
