@@ -14,13 +14,22 @@ public sealed class ComponentRegistry : IComponentRegistry
     /// <summary>Creates a registry from the given entries.</summary>
     /// <param name="entries">Entries to register. Names must be unique, ignoring case.</param>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Two entries share the same name (case-insensitive).</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="entries"/> contains a <see langword="null"/> element, or two entries share the same name (case-insensitive).
+    /// </exception>
     public ComponentRegistry(IEnumerable<RegistryEntry> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
 
+        var index = 0;
         foreach (var entry in entries)
         {
+            if (entry is null)
+            {
+                throw new ArgumentException($"entries contains a null element at index {index}.", nameof(entries));
+            }
+
+            index++;
             if (!_entries.TryAdd(entry.Name, entry))
             {
                 throw new ArgumentException($"Duplicate registry entry name '{entry.Name}'.", nameof(entries));
@@ -40,29 +49,41 @@ public sealed class ComponentRegistry : IComponentRegistry
     public IReadOnlyList<RegistryEntry> GetAll() => _all;
 
     /// <inheritdoc />
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or whitespace.</exception>
     public RegistryEntry? Find(string name)
     {
-        ArgumentNullException.ThrowIfNull(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         return _entries.TryGetValue(name, out var entry) ? entry : null;
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// Each requested name is visited in order; its <see cref="RegistryEntry.RegistryDependencies"/> are
+    /// Each requested name is trimmed and visited in order; its <see cref="RegistryEntry.RegistryDependencies"/> are
     /// visited before the entry itself is emitted. Entries already emitted are skipped, so the output is
     /// de-duplicated, dependencies precede their dependents, and independent entries keep request order.
     /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="names"/> is <see langword="null"/>, or one of its elements is.</exception>
+    /// <exception cref="ArgumentException">One of <paramref name="names"/> is empty or whitespace.</exception>
     public IReadOnlyList<RegistryEntry> ResolveWithDependencies(IEnumerable<string> names)
     {
         ArgumentNullException.ThrowIfNull(names);
+
+        // Validate every requested name before resolving any of them, so a bad element never leaves partial work behind.
+        var requested = new List<string>();
+        foreach (var name in names)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(name, nameof(names));
+            requested.Add(name.Trim());
+        }
 
         var output = new List<RegistryEntry>();
         var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var path = new List<string>();
 
-        foreach (var name in names.Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var name in requested.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             Visit(name, requiredBy: null, output, emitted, visiting, path);
         }

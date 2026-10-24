@@ -5,11 +5,83 @@ namespace BlazorShadcn.Tests.Registry;
 public class ComponentRegistryTests
 {
     [Fact]
-    public void Ctor_DuplicateNamesDifferentCase_ThrowsArgumentException()
+    public void Ctor_DuplicateNames_ThrowsArgumentExceptionNamingTheDuplicate()
     {
-        var entries = Arr(E("Button"), E("button"));
+        var entries = Arr(E("button"), E("button"));
 
-        Assert.Throws<ArgumentException>(() => new ComponentRegistry(entries));
+        var ex = Assert.Throws<ArgumentException>(() => new ComponentRegistry(entries));
+
+        Assert.Contains("'button'", ex.Message);
+    }
+
+    [Fact]
+    public void Ctor_NullEntries_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ComponentRegistry(null!));
+    }
+
+    [Fact]
+    public void Ctor_NullElement_ThrowsArgumentExceptionWithIndex()
+    {
+        var entries = Arr(E("core"), null!, E("button"));
+
+        var ex = Assert.Throws<ArgumentException>(() => new ComponentRegistry(entries));
+
+        Assert.Contains("index 1", ex.Message);
+    }
+
+    [Fact]
+    public void Find_BlankName_ThrowsArgumentException()
+    {
+        var registry = new ComponentRegistry(Arr(E("button")));
+
+        Assert.Throws<ArgumentException>(() => registry.Find("   "));
+    }
+
+    [Fact]
+    public void Find_NullName_ThrowsArgumentNullException()
+    {
+        var registry = new ComponentRegistry(Arr(E("button")));
+
+        Assert.Throws<ArgumentNullException>(() => registry.Find(null!));
+    }
+
+    [Fact]
+    public void ResolveWithDependencies_NullNames_ThrowsArgumentNullException()
+    {
+        var registry = new ComponentRegistry(Arr(E("button")));
+
+        Assert.Throws<ArgumentNullException>(() => registry.ResolveWithDependencies(null!));
+    }
+
+    [Fact]
+    public void ResolveWithDependencies_NullElement_ThrowsArgumentNullExceptionForNames()
+    {
+        var registry = new ComponentRegistry(Arr(E("button")));
+
+        var ex = Assert.Throws<ArgumentNullException>(() => registry.ResolveWithDependencies(Arr("button", null!)));
+
+        Assert.Equal("names", ex.ParamName);
+    }
+
+    [Fact]
+    public void ResolveWithDependencies_BlankElement_ThrowsArgumentExceptionForNames()
+    {
+        var registry = new ComponentRegistry(Arr(E("button")));
+
+        var ex = Assert.Throws<ArgumentException>(() => registry.ResolveWithDependencies(Arr("button", "  ")));
+
+        Assert.Equal("names", ex.ParamName);
+    }
+
+    [Fact]
+    public void ResolveWithDependencies_PaddedName_IsTrimmedBeforeLookup()
+    {
+        var registry = new ComponentRegistry(Arr(E("core"), E("button", "core")));
+
+        var result = registry.ResolveWithDependencies(Arr("  button\t"));
+
+        Assert.Equal(Arr("core", "button"), Names(result));
     }
 
     [Fact]
@@ -143,16 +215,6 @@ public class ComponentRegistryTests
         var ex = Assert.Throws<InvalidOperationException>(() => registry.ResolveWithDependencies(Arr("a")));
 
         Assert.Contains("a -> b -> a", ex.Message);
-    }
-
-    [Fact]
-    public void ResolveWithDependencies_SelfDependency_ThrowsInvalidOperationException()
-    {
-        var registry = new ComponentRegistry(Arr(E("a", "a")));
-
-        var ex = Assert.Throws<InvalidOperationException>(() => registry.ResolveWithDependencies(Arr("a")));
-
-        Assert.Contains("a -> a", ex.Message);
     }
 
     [Fact]
