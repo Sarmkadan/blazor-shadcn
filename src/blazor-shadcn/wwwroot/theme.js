@@ -16,13 +16,16 @@ function ensureMedia() {
     return media;
 }
 
-function readStoredMode(storageKey) {
+function normalize(value, fallback) {
+    return value === 'light' || value === 'dark' || value === 'system' ? value : fallback;
+}
+
+function readStoredMode(storageKey, fallback) {
     try {
-        const value = localStorage.getItem(storageKey);
-        return value === 'light' || value === 'dark' ? value : 'system';
+        return normalize(localStorage.getItem(storageKey), fallback);
     } catch {
-        // Storage can be unavailable (privacy modes, sandboxed frames); fall back to the OS preference.
-        return 'system';
+        // Storage can be unavailable (privacy modes, sandboxed frames); fall back to the configured default.
+        return fallback;
     }
 }
 
@@ -44,13 +47,14 @@ function apply(resolved) {
  * Calling it again replaces the previous subscription.
  * @param {string} storageKey localStorage key holding 'light' | 'dark' | 'system'.
  * @param {object} ref DotNetObjectReference whose OnSystemSchemeChanged(bool) receives OS changes.
+ * @param {string} defaultMode 'light' | 'dark' | 'system'; used when nothing valid is stored. Defaults to 'system'.
  * @returns {{ mode: string, resolved: string }}
  */
-export function init(storageKey, ref) {
+export function init(storageKey, ref, defaultMode = 'system') {
     dispose();
 
     dotnetRef = ref;
-    mode = readStoredMode(storageKey);
+    mode = readStoredMode(storageKey, normalize(defaultMode, 'system'));
     const resolved = apply(resolve(mode));
 
     listener = (event) => {
@@ -67,20 +71,17 @@ export function init(storageKey, ref) {
 }
 
 /**
- * Persists the mode (removing the key for 'system') and re-applies the document class.
+ * Persists the mode and re-applies the document class. 'system' is stored explicitly, not removed, so it
+ * still wins over a non-system default passed to init().
  * @param {string} storageKey localStorage key to write.
  * @param {string} next 'light' | 'dark' | 'system'.
  * @returns {string} The resolved scheme, 'light' or 'dark'.
  */
 export function setMode(storageKey, next) {
-    mode = next === 'light' || next === 'dark' ? next : 'system';
+    mode = normalize(next, 'system');
 
     try {
-        if (mode === 'system') {
-            localStorage.removeItem(storageKey);
-        } else {
-            localStorage.setItem(storageKey, mode);
-        }
+        localStorage.setItem(storageKey, mode);
     } catch {
         // Storage unavailable: the class still applies for the current page view.
     }

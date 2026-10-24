@@ -120,11 +120,12 @@ public static class DefaultRegistryEntries
             Files:
             [
                 "Theming/IThemeService.cs",
+                "Theming/ThemeOptions.cs",
                 "Theming/ThemeService.cs",
                 "wwwroot/theme.js",
             ],
             RegistryDependencies: [],
-            PackageDependencies: ["Microsoft.JSInterop"],
+            PackageDependencies: ["Microsoft.JSInterop", "Microsoft.Extensions.Options"],
             Description: "Dark, light and system theme switching via CSS variables and localStorage."),
 
         new RegistryEntry(
