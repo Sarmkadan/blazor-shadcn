@@ -5,7 +5,7 @@ namespace BlazorShadcn.Theming;
 
 /// <summary>
 /// JS-interop implementation of <see cref="IThemeService"/>. Persists the preference in
-/// <c>localStorage</c> and toggles the <c>dark</c> class on <c>&lt;html&gt;</c> through
+/// <c>localStorage</c> and toggles the <see cref="ThemeOptions.DarkClass"/> class on <c>&lt;html&gt;</c> through
 /// <c>wwwroot/theme.js</c>.
 /// </summary>
 /// <remarks>
@@ -28,10 +28,9 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
     /// <summary>The <c>localStorage</c> key used to persist the theme preference.</summary>
     public const string DefaultStorageKey = "blazor-shadcn-theme";
 
-    private const string _modulePath = "./_content/BlazorShadcn/theme.js";
-
     private readonly IJSRuntime _js;
-    private readonly string _storageKey;
+    private readonly string _modulePath;
+    private readonly ThemeJsOptions _jsOptions;
     private readonly ThemeMode _defaultMode;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private IJSObjectReference? _module;
@@ -41,7 +40,8 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
 
     /// <summary>
     /// Creates a theme service with default options (<c>localStorage</c> key <see cref="DefaultStorageKey"/>,
-    /// <see cref="ThemeMode.System"/> default). Use this overload when the service is created without DI.
+    /// <see cref="ThemeMode.System"/> default, <c>dark</c> class, <c>./_content/BlazorShadcn/theme.js</c>).
+    /// Use this overload when the service is created without DI.
     /// </summary>
     /// <param name="js">The JS runtime used to import <c>theme.js</c> and call its functions.</param>
     /// <exception cref="ArgumentNullException"><paramref name="js"/> is <see langword="null"/>.</exception>
@@ -54,7 +54,7 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
     /// <param name="js">The JS runtime used to import <c>theme.js</c> and call its functions.</param>
     /// <param name="options">The theme options; their values are read once, when the service is constructed.</param>
     /// <exception cref="ArgumentNullException"><paramref name="js"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><see cref="ThemeOptions.StorageKey"/> is empty or whitespace.</exception>
+    /// <exception cref="ArgumentException"><see cref="ThemeOptions.StorageKey"/> is empty or whitespace, or <see cref="ThemeOptions.ModulePath"/> is empty.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><see cref="ThemeOptions.DefaultMode"/> is not a defined <see cref="ThemeMode"/> value.</exception>
     public ThemeService(IJSRuntime js, IOptions<ThemeOptions> options)
     {
@@ -63,14 +63,21 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
 
         var value = options.Value;
         ArgumentException.ThrowIfNullOrWhiteSpace(value.StorageKey, nameof(options));
+        ArgumentException.ThrowIfNullOrWhiteSpace(value.ModulePath, nameof(options));
         if (!Enum.IsDefined(value.DefaultMode))
         {
             throw new ArgumentOutOfRangeException(nameof(options), value.DefaultMode, "Unknown ThemeMode.");
         }
 
         _js = js;
-        _storageKey = value.StorageKey;
+        _modulePath = value.ModulePath;
         _defaultMode = value.DefaultMode;
+        _jsOptions = new ThemeJsOptions(
+            StorageKey: value.StorageKey,
+            DefaultMode: ToJsValue(value.DefaultMode),
+            DarkClass: value.DarkClass,
+            UseColorSchemeAttribute: value.UseColorSchemeAttribute,
+            DisableTransitionOnChange: value.DisableTransitionOnChange);
         Mode = _defaultMode;
     }
 
@@ -112,7 +119,7 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
                 var module = await GetModuleAsync(cancellationToken);
                 _dotNetRef ??= DotNetObjectReference.Create(this);
 
-                var state = await module.InvokeAsync<ThemeState?>("init", cancellationToken, _storageKey, _dotNetRef, ToJsValue(_defaultMode));
+                var state = await module.InvokeAsync<ThemeState?>("init", cancellationToken, _jsOptions, _dotNetRef);
                 ApplyState(ParseMode(state?.Mode), ParseResolved(state?.Resolved));
                 _initialized = true;
             }
@@ -155,7 +162,7 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
 
             var module = await GetModuleAsync(cancellationToken);
-            var resolved = await module.InvokeAsync<string?>("setMode", cancellationToken, _storageKey, ToJsValue(mode));
+            var resolved = await module.InvokeAsync<string?>("setMode", cancellationToken, _jsOptions, ToJsValue(mode));
             ApplyState(mode, ParseResolved(resolved));
         }
         finally
@@ -291,6 +298,18 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
         ThemeMode.Dark => "dark",
         _ => "system",
     };
+
+    /// <summary>
+    /// Options handed to <c>theme.js</c> <c>init</c> and <c>setMode</c>. Blazor serializes it with camelCase names,
+    /// so the JS side reads <c>storageKey</c>, <c>defaultMode</c>, <c>darkClass</c>, <c>useColorSchemeAttribute</c>
+    /// and <c>disableTransitionOnChange</c>.
+    /// </summary>
+    internal sealed record ThemeJsOptions(
+        string StorageKey,
+        string DefaultMode,
+        string DarkClass,
+        bool UseColorSchemeAttribute,
+        bool DisableTransitionOnChange);
 
     /// <summary>Shape of the object returned by <c>theme.js</c> <c>init</c>.</summary>
     internal sealed record ThemeState(string? Mode, string? Resolved);

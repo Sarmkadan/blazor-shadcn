@@ -1,5 +1,6 @@
 using BlazorShadcn.Registry;
 using BlazorShadcn.Theming;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -15,6 +16,8 @@ public static class ServiceCollectionExtensions
     /// </summary>
     /// <remarks>
     /// Safe to call more than once: existing registrations are kept and nothing is duplicated.
+    /// <see cref="ThemeOptions"/> is validated by <see cref="ThemeOptionsValidator"/> when the host starts, so an
+    /// invalid theme configuration stops the application at startup with a list of the problems.
     /// </remarks>
     /// <param name="services">The service collection to add to.</param>
     /// <returns>The same <paramref name="services"/> instance, for chaining.</returns>
@@ -30,7 +33,34 @@ public static class ServiceCollectionExtensions
 
         services.TryAddScoped<IThemeService, ThemeService>();
         services.TryAddSingleton<IComponentRegistry>(_ => ComponentRegistry.CreateDefault());
-        services.AddOptions<ThemeOptions>();
+        // TryAddEnumerable keeps repeated AddBlazorShadcn calls from registering the validator twice, which would duplicate failure messages.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<ThemeOptions>, ThemeOptionsValidator>());
+        services.AddOptions<ThemeOptions>().ValidateOnStart();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the services as <see cref="AddBlazorShadcn(IServiceCollection)"/> does, and binds
+    /// <see cref="ThemeOptions"/> from the <c>BlazorShadcn:Theme</c> configuration section.
+    /// </summary>
+    /// <param name="services">The service collection to add to.</param>
+    /// <param name="configuration">The application configuration, usually <c>builder.Configuration</c>.</param>
+    /// <returns>The same <paramref name="services"/> instance, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> or <paramref name="configuration"/> is <see langword="null"/>.</exception>
+    /// <example>
+    /// <code>
+    /// // appsettings.json: { "BlazorShadcn": { "Theme": { "DefaultMode": "Dark" } } }
+    /// builder.Services.AddBlazorShadcn(builder.Configuration);
+    /// </code>
+    /// </example>
+    public static IServiceCollection AddBlazorShadcn(this IServiceCollection services, IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        AddBlazorShadcn(services);
+        services.Configure<ThemeOptions>(configuration.GetSection(ThemeOptions.SectionName));
 
         return services;
     }
