@@ -100,11 +100,160 @@ public class VariantConfigTests
     }
 
     [Fact]
-    public void Resolve_UnknownAxisInSelection_IsIgnored()
+    public void Resolve_UnknownAxisInSelection_ThrowsArgumentExceptionListingKnownAxes()
     {
-        var classes = ButtonLike().Resolve(new Dictionary<string, string?> { ["color"] = "red" });
+        var config = ButtonLike();
+        var selection = new Dictionary<string, string?> { ["colour"] = "red" };
 
-        Assert.Equal("inline-flex rounded-md bg-primary h-9 px-4", classes);
+        var ex = Assert.Throws<ArgumentException>(() => config.Resolve(selection));
+
+        Assert.Equal("selection", ex.ParamName);
+        Assert.Contains("colour", ex.Message);
+        Assert.Contains("Known axes: variant, size.", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_BlankSelectionKey_ThrowsArgumentExceptionForSelection()
+    {
+        var config = ButtonLike();
+        var selection = new Dictionary<string, string?> { ["  "] = "default" };
+
+        var ex = Assert.Throws<ArgumentException>(() => config.Resolve(selection));
+
+        Assert.Equal("selection", ex.ParamName);
+    }
+
+    [Fact]
+    public void Resolve_SelectedValueNotOnAxis_ListsAllowedValues()
+    {
+        var config = ButtonLike();
+        var selection = new Dictionary<string, string?> { ["size"] = "xl" };
+
+        var ex = Assert.Throws<ArgumentException>(() => config.Resolve(selection));
+
+        Assert.Equal("selection", ex.ParamName);
+        Assert.Contains("'xl'", ex.Message);
+        Assert.Contains("'size'", ex.Message);
+        Assert.Contains("Allowed values: default, sm, lg.", ex.Message);
+    }
+
+    [Fact]
+    public void Compile_AxisNameWhitespace_ThrowsInvalidOperationException()
+    {
+        var config = new VariantConfig
+        {
+            Base = _baseClasses,
+            Variants = new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                [" "] = new Dictionary<string, string> { ["on"] = "block" },
+            },
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => config.Compile());
+
+        Assert.Contains("axis name", ex.Message);
+    }
+
+    [Fact]
+    public void Compile_AxisWithNoValues_ThrowsInvalidOperationExceptionNamingAxis()
+    {
+        var config = new VariantConfig
+        {
+            Base = _baseClasses,
+            Variants = new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                ["size"] = new Dictionary<string, string>(),
+            },
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => config.Compile());
+
+        Assert.Equal("VariantConfig axis 'size' has no values.", ex.Message);
+    }
+
+    [Fact]
+    public void Compile_ValueWithNullClasses_ThrowsInvalidOperationExceptionNamingValue()
+    {
+        var config = new VariantConfig
+        {
+            Base = _baseClasses,
+            Variants = new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                ["size"] = new Dictionary<string, string> { ["sm"] = null! },
+            },
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => config.Compile());
+
+        Assert.Contains("'sm'", ex.Message);
+        Assert.Contains("'size'", ex.Message);
+    }
+
+    [Fact]
+    public void Compile_ValueWithEmptyClasses_IsAllowed()
+    {
+        var config = new VariantConfig
+        {
+            Base = _baseClasses,
+            Variants = new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                ["size"] = new Dictionary<string, string> { ["none"] = string.Empty },
+            },
+            DefaultVariants = new Dictionary<string, string> { ["size"] = "none" },
+        };
+
+        Assert.Equal(_baseClasses, config.Resolve());
+    }
+
+    [Fact]
+    public void CompoundVariant_NoConditions_ThrowsArgumentException()
+    {
+        var ex = Assert.Throws<ArgumentException>(() =>
+            new CompoundVariant(new Dictionary<string, string>(), "shadow-none"));
+
+        Assert.Equal("conditions", ex.ParamName);
+        Assert.Contains("no conditions", ex.Message);
+    }
+
+    [Fact]
+    public void CompoundVariant_NullConditions_ThrowsArgumentNullException()
+    {
+        var ex = Assert.Throws<ArgumentNullException>(() => new CompoundVariant(null!, "shadow-none"));
+
+        Assert.Equal("conditions", ex.ParamName);
+    }
+
+    [Fact]
+    public void CompoundVariant_NullClasses_ThrowsArgumentNullException()
+    {
+        var ex = Assert.Throws<ArgumentNullException>(() =>
+            new CompoundVariant(new Dictionary<string, string> { ["size"] = "sm" }, null!));
+
+        Assert.Equal("classes", ex.ParamName);
+    }
+
+    [Fact]
+    public void Init_NullBase_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new VariantConfig { Base = null! });
+    }
+
+    [Fact]
+    public void Init_NullVariants_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new VariantConfig { Variants = null! });
+    }
+
+    [Fact]
+    public void Init_NullDefaultVariants_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new VariantConfig { DefaultVariants = null! });
+    }
+
+    [Fact]
+    public void Init_NullCompoundVariants_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new VariantConfig { CompoundVariants = null! });
     }
 
     [Fact]
