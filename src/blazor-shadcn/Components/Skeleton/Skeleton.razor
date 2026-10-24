@@ -1,0 +1,8 @@
+@namespace BlazorShadcn.Components
+@inherits ShadcnComponentBase
+
+@*
+    Placeholder block for loading states. Size and shape come from the consumer's Class:
+    e.g. <Skeleton Class="h-12 w-12 rounded-full" /> replaces the default rounded-md via TwMerge.
+*@
+<div class="@ClassValue("animate-pulse rounded-md bg-primary/10")" aria-hidden="true" @attributes="AttributesWithoutClass()">@ChildContent</div>

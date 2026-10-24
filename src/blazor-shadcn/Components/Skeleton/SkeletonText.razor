@@ -1,0 +1,31 @@
+@namespace BlazorShadcn.Components
+@inherits ShadcnComponentBase
+
+<div class="@ClassValue("flex flex-col gap-2")" @attributes="AttributesWithoutClass()">
+    @for (var i = 0; i < LineCount; i++)
+    {
+        var index = i;
+        var isLast = index == LineCount - 1;
+        <Skeleton @key="index" Class="@LineClassFor(isLast)" />
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// Number of skeleton lines to render. Values below 1 are clamped to 1.
+    /// </summary>
+    [Parameter]
+    public int Lines { get; set; } = 3;
+
+    /// <summary>
+    /// Classes applied to every line, typically a height such as <c>h-4</c>. Consumer width classes here
+    /// are overridden on the last line by <c>w-3/4</c>, which comes later in the merged class string.
+    /// </summary>
+    [Parameter]
+    public string LineClass { get; set; } = "h-4";
+
+    private int LineCount => Math.Max(1, Lines);
+
+    // The last line is narrower. "w-3/4" is appended after LineClass, so TwMerge keeps it over any w-* in LineClass.
+    private string LineClassFor(bool isLast) => isLast ? $"{LineClass} w-3/4" : LineClass;
+}

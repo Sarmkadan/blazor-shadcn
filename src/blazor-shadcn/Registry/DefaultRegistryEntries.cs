@@ -108,6 +108,7 @@ public static class DefaultRegistryEntries
             Files:
             [
                 "Components/Skeleton/Skeleton.razor",
+                "Components/Skeleton/SkeletonText.razor",
             ],
             RegistryDependencies: ["core"],
             PackageDependencies: [],
