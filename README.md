@@ -251,6 +251,225 @@ Validation happens at `Compile()`, which means an invalid configuration throws o
 
 Mistakes in `selection` are reported on every call. Mistakes in the configuration are reported once, when it is first compiled.
 
+## Components
+
+Each folder under `src/blazor-shadcn/Components/` is one shadcn/ui component, ported 1:1 (same variant names, sizes and CSS variables). `Card` and `Skeleton` are families: the sub-components are separate files in the same folder.
+
+| Component | Parameters | shadcn/ui source |
+|-----------|------------|------------------|
+| `Button` | `Variant` (`ButtonVariant`: `Default`, `Destructive`, `Outline`, `Secondary`, `Ghost`, `Link`), `Size` (`ButtonSize`: `Default`, `Sm`, `Lg`, `Icon`), `Type` (default `button`), `Disabled` | `button.tsx` |
+| `Badge` | `Variant` (`BadgeVariant`: `Default`, `Secondary`, `Destructive`, `Outline`) | `badge.tsx` |
+| `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter` | `CardTitle.As` (default `h3`); the rest take only `Class` and `ChildContent` | `card.tsx` |
+| `Input` | `Value` / `ValueChanged` (`@bind-Value`), `Type` (default `text`), `Placeholder`, `Disabled`, `ReadOnly`, `UpdateOnInput` (default: update on `change`) | `input.tsx` |
+| `Label` | `For` (the `id` of the control it describes) | `label.tsx` |
+| `Separator` | `Orientation` (`SeparatorOrientation`: `Horizontal`, `Vertical`), `Decorative` (default `true`) | `separator.tsx` |
+| `Skeleton`, `SkeletonText` | `SkeletonText.Lines` (default `3`), `SkeletonText.LineClass` (default `h-4`) | `skeleton.tsx` |
+
+Every component inherits `ShadcnComponentBase`, so it shares the same attribute contract: `Class` (or a `class` attribute) is merged into the root element's classes with `Cn()` and wins Tailwind conflicts, while `id`, `aria-*`, `data-*` and event handlers such as `@onclick` are splatted onto the root element.
+
+### Button
+
+```razor
+<Button Variant="ButtonVariant.Destructive" Size="ButtonSize.Sm" Class="mt-4" @onclick="Delete">
+    Delete account
+</Button>
+
+@code {
+    private void Delete()
+    {
+        // ...
+    }
+}
+```
+
+### Badge
+
+```razor
+<Badge Variant="BadgeVariant.Secondary">Beta</Badge>
+<Badge Variant="BadgeVariant.Destructive" id="sync-status">Sync failed</Badge>
+```
+
+### Card
+
+```razor
+<Card Class="w-[380px]">
+    <CardHeader>
+        <CardTitle>Create project</CardTitle>
+        <CardDescription>Deploy the app to your default region.</CardDescription>
+    </CardHeader>
+    <CardContent>
+        <p>The project is created with the default settings.</p>
+    </CardContent>
+    <CardFooter class="justify-between">
+        <Button Variant="ButtonVariant.Outline">Cancel</Button>
+        <Button>Deploy</Button>
+    </CardFooter>
+</Card>
+```
+
+### Input and Label
+
+`Label.For` renders the HTML `for` attribute, so it must match the `id` that is splatted onto the `<input>`:
+
+```razor
+<div class="grid gap-2">
+    <Label For="email">Email</Label>
+    <Input id="email" type="email" placeholder="you@example.com" @bind-Value="email" />
+</div>
+
+@code {
+    private string? email;
+}
+```
+
+`@bind-Value` updates `email` when the input loses focus. Set `UpdateOnInput="true"` to update on every keystroke.
+
+### Separator
+
+A vertical separator stretches to the height of its flex row:
+
+```razor
+<div class="flex h-5 items-center gap-4 text-sm">
+    <span>Blog</span>
+    <Separator Orientation="SeparatorOrientation.Vertical" />
+    <span>Docs</span>
+    <Separator Orientation="SeparatorOrientation.Vertical" />
+    <span>Source</span>
+</div>
+```
+
+### Skeleton
+
+Size and shape come from `Class`. The skeleton is hidden from assistive technology (`aria-hidden="true"`), so give the loading region its own status text if screen reader users need it.
+
+```razor
+@if (isLoading)
+{
+    <Card Class="w-[380px]">
+        <CardHeader>
+            <Skeleton Class="h-5 w-40" />
+            <Skeleton Class="h-4 w-64" />
+        </CardHeader>
+        <CardContent>
+            <SkeletonText Lines="4" />
+        </CardContent>
+    </Card>
+}
+else
+{
+    <p>Profile loaded.</p>
+}
+
+@code {
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Replace with your data call.
+        await Task.Delay(500);
+        isLoading = false;
+    }
+}
+```
+
+## Registry and theming
+
+### Registry
+
+`IComponentRegistry` is the catalog behind the planned `dotnet shadcn` CLI. `ComponentRegistry.CreateDefault()` builds it from `DefaultRegistryEntries.All` (`src/blazor-shadcn/Registry/`). Each `RegistryEntry` lists its source files, the registry entries it depends on, and its NuGet package dependencies.
+
+`ResolveWithDependencies` returns the install set in dependency order, dependencies first:
+
+```csharp
+using BlazorShadcn.Registry;
+
+IComponentRegistry registry = ComponentRegistry.CreateDefault();
+
+foreach (var entry in registry.ResolveWithDependencies(["login-form"]))
+{
+    Console.WriteLine(entry.Name);
+}
+
+// core
+// card
+// button
+// input
+// label
+// login-form
+```
+
+Each entry has one of four types. The CLI does not exist yet, so the destinations below are the planned ones, matching the folder layout in this README:
+
+| Type | Entries | Planned destination in your project |
+|------|---------|-------------------------------------|
+| `Core` | `core` | `Utils/`, `Variants/` and `Components/ShadcnComponentBase.cs` |
+| `Ui` | `button`, `badge`, `card`, `input`, `label`, `separator`, `skeleton` | `Components/<Name>/` |
+| `Service` | `theme-service` | `Theming/` (C# files) and `wwwroot/` (`theme.js`) |
+| `Block` | `login-form` | `Components/Blocks/` |
+
+The `login-form` block is registered, but its `Components/Blocks/LoginForm.razor` source is not in this repository yet.
+
+### Theming
+
+`IThemeService` switches between light, dark and system color schemes by toggling the `dark` class on `<html>`. Components only use CSS variables, so they never check the theme themselves.
+
+Register the service as scoped, one instance per circuit or app:
+
+```csharp
+builder.Services.AddScoped<IThemeService, ThemeService>();
+```
+
+Call `InitializeAsync` once the component is interactive. Do it in `OnAfterRenderAsync` with `firstRender` set to `true`, in a component that runs interactively, such as your layout:
+
+```razor
+@inject IThemeService Theme
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Theme.InitializeAsync();
+        }
+    }
+}
+```
+
+A toggle button uses `ToggleAsync` and re-renders when `ResolvedChanged` fires. The event also fires when the OS scheme changes while the mode is `System`:
+
+```razor
+@implements IDisposable
+@inject IThemeService Theme
+
+<Button Variant="ButtonVariant.Ghost" @onclick="Toggle">
+    @(Theme.Resolved == ThemeMode.Dark ? "Switch to light" : "Switch to dark")
+</Button>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Theme.ResolvedChanged += OnResolvedChanged;
+    }
+
+    private Task Toggle() => Theme.ToggleAsync();
+
+    private void OnResolvedChanged(ThemeMode _) => StateHasChanged();
+
+    public void Dispose()
+    {
+        Theme.ResolvedChanged -= OnResolvedChanged;
+    }
+}
+```
+
+`ToggleAsync` and `SetModeAsync` call `InitializeAsync` themselves if it has not run yet. `InitializeAsync` is idempotent.
+
+The JavaScript module is served from the library's static assets at `_content/BlazorShadcn/theme.js`. `ThemeService` imports that path directly, so if you copy the `theme-service` files into your project instead of referencing the package, change the path in `ThemeService.cs` to match where `theme.js` is served.
+
+The preference is stored in `localStorage` under the key `blazor-shadcn-theme`, with the values `light` or `dark`. The key is removed for `System`, which is the default when nothing is stored.
+
+**Prerendering caveat.** During prerendering there is no JavaScript interop, so `InitializeAsync` does nothing. The prerendered HTML has no `dark` class, and `Resolved` stays `Light`. Once the component is interactive, the stored preference is applied, so a user who chose dark may see a flash of light content on first load. The library does not ship a fix. If the flash matters, add a small inline script to `<head>` that reads `blazor-shadcn-theme` and sets the `dark` class before the first paint.
+
 ## Installation
 
 1. Add Tailwind CSS to your Blazor project (standalone CLI or PostCSS) and the shadcn CSS variables to your `app.css`.
@@ -284,11 +503,13 @@ dotnet add package BlazorShadcn
 ## Roadmap
 
 - [ ] `ClassNames` with full tailwind-merge conflict groups
-- [ ] `VariantConfig` resolver + compound variants
-- [ ] Core components: Button, Badge, Card, Input, Label, Textarea, Checkbox, Switch, Separator, Skeleton
+- [x] `VariantConfig` resolver + compound variants
+- [x] Core components: Button, Badge, Card, Input, Label, Separator, Skeleton
+- [ ] Core components: Textarea, Checkbox, Switch
 - [ ] Overlay components: Dialog, Sheet, Popover, Tooltip, DropdownMenu (focus trap, Escape, outside click)
 - [ ] Form components: Select, RadioGroup, Form with `EditContext` integration
-- [ ] `ThemeService` + `ThemeToggle`
+- [x] `ThemeService`
+- [ ] `ThemeToggle` component (the README shows a snippet; no component ships yet)
 - [ ] `dotnet shadcn` CLI reading the registry
 - [ ] Docs site with live previews
 
