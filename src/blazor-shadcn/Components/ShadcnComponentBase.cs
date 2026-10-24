@@ -1,3 +1,4 @@
+using BlazorShadcn.Utils;
 using Microsoft.AspNetCore.Components;
 
 namespace BlazorShadcn.Components;
@@ -36,7 +37,11 @@ public abstract class ShadcnComponentBase : ComponentBase
     /// <param name="componentClasses">Classes produced by the component's variant resolver.</param>
     /// <returns>A merged class string, or <see langword="null"/> when empty.</returns>
     protected string? ClassValue(string? componentClasses)
-        => throw new NotImplementedException();
+    {
+        // Order matters: variant classes first, then Class, then the splatted class so consumer overrides win.
+        var merged = ClassNames.Cn(componentClasses, Class, SplattedClass());
+        return merged.Length == 0 ? null : merged;
+    }
 
     /// <summary>
     /// Returns <see cref="AdditionalAttributes"/> without the <c>class</c> key, so the merged class
@@ -44,5 +49,66 @@ public abstract class ShadcnComponentBase : ComponentBase
     /// </summary>
     /// <returns>Attributes safe to splat onto the root element.</returns>
     protected IReadOnlyDictionary<string, object>? AttributesWithoutClass()
-        => throw new NotImplementedException();
+    {
+        if (AdditionalAttributes is null or { Count: 0 })
+        {
+            return null;
+        }
+
+        if (!HasClassKey(AdditionalAttributes))
+        {
+            return AdditionalAttributes;
+        }
+
+        var filtered = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var (key, value) in AdditionalAttributes)
+        {
+            if (!IsClassKey(key))
+            {
+                filtered[key] = value;
+            }
+        }
+
+        return filtered;
+    }
+
+    /// <summary>
+    /// Root classes for components without variants: equivalent to <c>ClassValue(null)</c>.
+    /// </summary>
+    protected virtual string? RootClass => ClassValue(null);
+
+    /// <summary>Reads the <c>class</c> value from <see cref="AdditionalAttributes"/>, if present.</summary>
+    private string? SplattedClass()
+    {
+        if (AdditionalAttributes is null)
+        {
+            return null;
+        }
+
+        foreach (var (key, value) in AdditionalAttributes)
+        {
+            if (IsClassKey(key))
+            {
+                return value?.ToString();
+            }
+        }
+
+        return null;
+    }
+
+    private static bool HasClassKey(IReadOnlyDictionary<string, object> attributes)
+    {
+        foreach (var key in attributes.Keys)
+        {
+            if (IsClassKey(key))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsClassKey(string key)
+        => string.Equals(key, "class", StringComparison.OrdinalIgnoreCase);
 }
