@@ -83,6 +83,7 @@ public static class DefaultRegistryEntries
             Files:
             [
                 "Components/Label/Label.razor",
+                "Components/Label/Label.razor.cs",
             ],
             RegistryDependencies: ["core"],
             PackageDependencies: [],
