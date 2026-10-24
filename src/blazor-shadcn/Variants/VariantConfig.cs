@@ -33,6 +33,10 @@ public sealed class VariantConfig
     /// (axis name to chosen value) plus an optional extra class string, and returns the final merged
     /// class string via <see cref="Utils.ClassNames.Cn(object?[])"/>.
     /// </summary>
+    /// <remarks>
+    /// Selection keys that do not name a defined axis are ignored, so a caller can pass a wider props bag
+    /// without breaking resolution. A selected value that is not defined for a known axis throws.
+    /// </remarks>
     /// <returns>A reusable resolver function.</returns>
     /// <exception cref="InvalidOperationException">
     /// Thrown when <see cref="DefaultVariants"/> or a <see cref="CompoundVariant"/> references an axis or value
