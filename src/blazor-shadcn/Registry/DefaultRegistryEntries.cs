@@ -56,7 +56,7 @@ public static class DefaultRegistryEntries
             [
                 "Components/Card/Card.razor",
                 "Components/Card/CardHeader.razor",
-                "Components/Card/CardTitle.razor",
+                "Components/Card/CardTitle.cs",
                 "Components/Card/CardDescription.razor",
                 "Components/Card/CardContent.razor",
                 "Components/Card/CardFooter.razor",
