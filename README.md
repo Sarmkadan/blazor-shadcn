@@ -66,6 +66,191 @@ public partial class Button : ShadcnComponentBase
 }
 ```
 
+## Core primitives
+
+shadcn/ui components are styled with [Tailwind CSS](https://tailwindcss.com) utility classes: `px-4` is 1rem of horizontal padding, `text-sm` is a small font size. You do not need to know either library in depth to use this section. Two helpers do the bookkeeping:
+
+- `ClassNames` builds one class string from several sources and removes conflicting Tailwind utilities.
+- `VariantConfig` maps a component option such as `variant="destructive"` to the classes it should add.
+
+Both live in `Utils/ClassNames.cs` and `Variants/VariantConfig.cs` and depend only on the .NET base library.
+
+### Cn()
+
+`ClassNames.Cn(params object?[] inputs)` is the Blazor version of shadcn's `cn()` helper. Pass it any mix of class sources. It flattens them, drops the empty ones, and resolves Tailwind conflicts so that the last class wins.
+
+```csharp
+ClassNames.Cn("px-2 py-1", "px-4");   // "py-1 px-4"
+```
+
+What it accepts:
+
+| Input | Behaviour |
+|-------|-----------|
+| `string` | Split on whitespace, so `"px-2  py-1"` is two classes. |
+| `null`, `false` | Dropped. |
+| `true` | Ignored. |
+| `IEnumerable` (list, array) | Flattened. `null` and `false` items inside it are dropped too. |
+| Any other object | `ToString()`, so `Cn(5)` gives `"5"`. |
+
+Exact duplicates are removed as well, and the last occurrence keeps its position.
+
+#### Conditional classes
+
+C# has no clsx-style `condition && "class"`. A `bool && string` expression does not compile, so this line is an error:
+
+```csharp
+// Does not compile: bool && string
+ClassNames.Cn("px-2", isActive && "bg-primary");
+```
+
+Use a ternary that yields `null` (or `false`) when the condition is off:
+
+```csharp
+ClassNames.Cn("px-2", isActive ? "bg-primary" : null);
+// isActive == true  -> "px-2 bg-primary"
+// isActive == false -> "px-2"
+```
+
+#### Examples
+
+| Call | Result | Why |
+|------|--------|-----|
+| `Cn("px-2 py-1", "px-4")` | `py-1 px-4` | Both set horizontal padding (`px`). The later `px-4` wins. |
+| `Cn("p-2", "px-4")` | `p-2 px-4` | `p` sets all four sides, `px` only left and right. Both survive, and `px-4` wins on the horizontal sides. |
+| `Cn("text-sm", "text-red-500")` | `text-sm text-red-500` | `text-sm` is a font size and `text-red-500` is a color. Different groups, so both stay. |
+| `Cn("hover:bg-primary", "bg-secondary")` | `hover:bg-primary bg-secondary` | The `hover:` prefix is part of the scope. The hover rule and the base rule never conflict. |
+| `Cn("w-4", "w-[32px]")` | `w-[32px]` | Arbitrary values are classified like named ones. Both are widths (`w`), so the later one wins. |
+
+### TwMerge()
+
+`ClassNames.TwMerge(string classes)` runs only the conflict step on a string that is already joined. `Cn` calls it for you, so reach for `TwMerge` only when you already have a single class string.
+
+Two utilities conflict when they are in the same group and have the same variant scope. The groups follow `tailwind-merge`:
+
+| Area | Groups | Example that conflicts |
+|------|--------|------------------------|
+| Spacing | `p` `px` `py` `pt` `pr` `pb` `pl`, `m` `mx` `my` `mt` `mr` `mb` `ml`, `gap` `gap-x` `gap-y` | `px-2` and `px-4` |
+| Sizing | `w` `h` `size` `min-w` `max-w` `min-h` `max-h` | `w-4` and `w-[32px]` |
+| Typography | `text-size`, `text-color`, `text-align`, `font-weight`, `font-family`, `leading`, `tracking` | `text-sm` and `text-lg`; `font-medium` and `font-bold` |
+| Colors | `bg`, `text-color`, `border-color`, `ring-color`, `shadow-color` | `bg-primary` and `bg-destructive` |
+| Borders | `border-w`, `border-style`, `border-x` to `border-l`, `border-color-*`, `rounded`, `rounded-t` to `rounded-bl` | `border` and `border-2`; `rounded-md` and `rounded-lg` |
+| Layout | `display`, `position`, `flex`, `flex-direction`, `flex-wrap`, `inset`, `top` `right` `bottom` `left`, `z`, `overflow`, `items`, `justify`, `self` | `flex` and `inline-flex`; `relative` and `absolute` |
+| Effects | `shadow`, `shadow-color`, `ring-w`, `ring-color`, `ring-inset`, `ring-offset-w`, `ring-offset-color`, `opacity` | `ring-1` and `ring-2`; `shadow` and `shadow-sm` |
+
+**Shorthands override the sides they cover.** A later shorthand removes the earlier, more specific utilities in the same scope. The reverse order keeps both:
+
+```csharp
+ClassNames.TwMerge("px-2 p-4");   // "p-4"        p covers px, so px-2 is removed
+ClassNames.TwMerge("p-4 px-2");   // "p-4 px-2"   px is more specific and comes later, so both stay
+```
+
+The same rule applies to the other pairs: `size-*` covers `w-*` and `h-*`, `inset-*` covers `top-*` through `left-*`, `gap-*` covers `gap-x-*` and `gap-y-*`, and `rounded-*` covers every corner.
+
+Scope rules:
+
+- Variant order does not matter. `hover:md:px-2` and `md:hover:px-4` conflict.
+- A variant changes the scope. `hover:px-2` and `px-4` do not conflict.
+- The important marker is part of the scope. `p-2 !px-4` keeps both.
+
+#### Limitations
+
+- Only the utilities in the table above are recognized. Anything else, such as plugin classes like `scrollbar-hide`, is kept verbatim. It never conflicts with another class and is removed only when an exact duplicate appears later.
+- `bg-*` is one group, so `bg-cover` and `bg-primary` conflict with each other. Put a background image and a background color on different elements, or use an arbitrary value.
+- Your Tailwind config is not read. Only the built-in text sizes (`xs` to `9xl`) count as sizes, so a custom size such as `text-display` is treated as a color and will not replace `text-sm`. Use an arbitrary value such as `text-[2.5rem]` instead.
+
+### VariantConfig
+
+`VariantConfig` is a port of `class-variance-authority` (cva). A component describes its options as data, and each call to `Resolve` turns the caller's choices into classes. It has four properties:
+
+- `Base`: classes that are always applied.
+- `Variants`: each axis (for example `variant` or `size`) maps its value names to classes.
+- `DefaultVariants`: the value used for each axis when the caller does not choose one.
+- `CompoundVariants`: classes applied only when several axis values match at the same time.
+
+This example is a simplified version of the `Badge` component in `Components/Badge/Badge.razor.cs`, with a `size` axis and a compound variant added:
+
+```csharp
+using BlazorShadcn.Variants;
+
+public static class Badges
+{
+    public static readonly VariantConfig Badge = new()
+    {
+        Base = "inline-flex items-center rounded-md border font-semibold transition-colors",
+        Variants = new Dictionary<string, IReadOnlyDictionary<string, string>>
+        {
+            ["variant"] = new Dictionary<string, string>
+            {
+                ["default"] = "border-transparent bg-primary text-primary-foreground",
+                ["secondary"] = "border-transparent bg-secondary text-secondary-foreground",
+                ["outline"] = "text-foreground",
+            },
+            ["size"] = new Dictionary<string, string>
+            {
+                ["default"] = "px-2.5 py-0.5 text-xs",
+                ["sm"] = "px-2 py-0 text-[10px]",
+            },
+        },
+        DefaultVariants = new Dictionary<string, string>
+        {
+            ["variant"] = "default",
+            ["size"] = "default",
+        },
+        CompoundVariants =
+        [
+            new CompoundVariant(
+                new Dictionary<string, string> { ["variant"] = "outline", ["size"] = "sm" },
+                "border-dashed"),
+        ],
+    };
+}
+```
+
+Resolving it:
+
+```csharp
+Badges.Badge.Resolve();
+// "inline-flex items-center rounded-md border font-semibold transition-colors
+//  border-transparent bg-primary text-primary-foreground px-2.5 py-0.5 text-xs"
+
+Badges.Badge.Resolve(
+    new Dictionary<string, string?> { ["variant"] = "secondary" },
+    className: "ml-2");
+// "... border-transparent bg-secondary text-secondary-foreground px-2.5 py-0.5 text-xs ml-2"
+
+Badges.Badge.Resolve(new Dictionary<string, string?> { ["variant"] = "outline", ["size"] = "sm" });
+// "... text-foreground px-2 py-0 text-[10px] border-dashed"
+```
+
+A selection value of `null` means "use the default". Axes you leave out also use their default, so `Resolve()` with no arguments is the default badge.
+
+#### CompoundVariants
+
+A compound variant applies only when every one of its conditions matches the effective selection, meaning the caller's choices after defaults are filled in. In the example above, `border-dashed` is added only for `variant="outline"` together with `size="sm"`. a selection of only `size = "sm"` does not add it, because `variant` falls back to `default`.
+
+#### Resolve() or Compile()
+
+- `Resolve(selection, className)` is what components call. The first call compiles the configuration and stores the result on that instance, so later calls skip the setup. Keep the `VariantConfig` in a `static readonly` field, as the components do, and call `Resolve`.
+- `Compile()` validates the configuration and returns the delegate itself, of type `Func<IReadOnlyDictionary<string, string?>?, string?, string>`. You only need it when you want to hold the delegate directly, for example in a field of another type. It does the same work `Resolve` caches.
+
+Validation happens at `Compile()`, which means an invalid configuration throws on the first `Resolve` call, not when the object is created. The dictionaries you pass in are stored by reference, not copied, so do not change them after the first call.
+
+#### Exceptions
+
+| Situation | Exception | Message (abridged) |
+|-----------|-----------|--------------------|
+| `DefaultVariants` names an axis that is not in `Variants` | `InvalidOperationException` | `DefaultVariants references variant axis 'color' which is not defined in Variants.` |
+| `DefaultVariants` names a value that the axis does not have | `InvalidOperationException` | `DefaultVariants references value 'xl' which is not defined for variant axis 'size'.` |
+| A compound condition names an unknown axis or value | `InvalidOperationException` | `CompoundVariants references value 'ghost' ...` |
+| An axis has no values, or a value has a `null` class string | `InvalidOperationException` | `VariantConfig axis 'size' has no values.` |
+| A selection key is not an axis, e.g. `colour` | `ArgumentException` (parameter `selection`) | `Unknown variant axis 'colour'. Known axes: variant, size.` |
+| A selection value is not on its axis, e.g. `size = "xl"` | `ArgumentException` (parameter `selection`) | `Value 'xl' is not defined for variant axis 'size'. Allowed values: default, sm.` |
+| A selection key is null or blank | `ArgumentException` (parameter `selection`) | |
+| A `CompoundVariant` has no conditions | `ArgumentException` at construction | `A compound variant with no conditions would always apply.` |
+
+Mistakes in `selection` are reported on every call. Mistakes in the configuration are reported once, when it is first compiled.
+
 ## Installation
 
 1. Add Tailwind CSS to your Blazor project (standalone CLI or PostCSS) and the shadcn CSS variables to your `app.css`.
@@ -90,7 +275,7 @@ dotnet add package BlazorShadcn
 |------|---------|
 | `ClassNames.Cn(params object?[])` | Join classes, drop falsy, resolve Tailwind conflicts (last wins). |
 | `ClassNames.TwMerge(string)` | Conflict resolution only, for pre-joined strings. |
-| `VariantConfig` | `Base`, `Variants`, `DefaultVariants`, `CompoundVariants`; `Resolve(selection, class)` / `Compile()`. |
+| `VariantConfig` | `Base`, `Variants`, `DefaultVariants`, `CompoundVariants`; `Resolve(selection?, className?)` / `Compile()`. |
 | `ShadcnComponentBase` | `Class`, `ChildContent`, `AdditionalAttributes`; `ClassValue(...)`, `AttributesWithoutClass()`. |
 | `IComponentRegistry` | `GetAll()`, `Find(name)`, `ResolveWithDependencies(names)`. |
 | `RegistryEntry` | Name, type (`Core`/`Ui`/`Service`/`Block`), files, registry deps, package deps. |

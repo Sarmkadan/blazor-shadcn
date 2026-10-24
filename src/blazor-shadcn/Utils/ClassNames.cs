@@ -25,7 +25,7 @@ public static class ClassNames
     /// <returns>A normalized class string with duplicates and conflicts removed.</returns>
     /// <example>
     /// <code>
-    /// ClassNames.Cn("px-2 py-1", isActive &amp;&amp; "bg-primary", "px-4")
+    /// ClassNames.Cn("px-2 py-1", isActive ? "bg-primary" : null, "px-4")
     /// // => "py-1 bg-primary px-4"
     /// </code>
     /// </example>
