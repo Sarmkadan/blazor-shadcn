@@ -11,6 +11,16 @@ namespace BlazorShadcn.Theming;
 /// Register as scoped (per circuit) or singleton (per WebAssembly app). Call
 /// <see cref="InitializeAsync"/> once the component tree is interactive, e.g. from
 /// <c>OnAfterRenderAsync(firstRender: true)</c>; during prerendering it is a no-op.
+/// <para>
+/// <see cref="SetModeAsync"/> and <see cref="ToggleAsync"/> auto-initialize: if
+/// <see cref="InitializeAsync"/> has not completed yet they call it first, so the module is imported
+/// exactly once and consumers do not need to order the calls themselves.
+/// </para>
+/// <para>
+/// Untrusted JS results are never trusted blindly: an unknown or missing mode falls back to
+/// <see cref="ThemeMode.System"/> and an unknown or missing resolved scheme falls back to
+/// <see cref="ThemeMode.Light"/>.
+/// </para>
 /// </remarks>
 public sealed class ThemeService : IThemeService, IAsyncDisposable
 {
@@ -28,8 +38,11 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
 
     /// <summary>Creates a theme service that talks to the browser through <paramref name="js"/>.</summary>
     /// <param name="js">The JS runtime used to import <c>theme.js</c> and call its functions.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="js"/> is <see langword="null"/>.</exception>
     public ThemeService(IJSRuntime js)
     {
+        ArgumentNullException.ThrowIfNull(js);
+
         _js = js;
     }
 
@@ -43,6 +56,12 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
     public event Action<ThemeMode>? ResolvedChanged;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Safe to call repeatedly; only the first successful call talks to JS. Prerendering and a disconnected
+    /// circuit are swallowed and leave the defaults in place, so a later call can still initialize.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The service has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -50,6 +69,8 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
             if (_initialized)
             {
                 return;
@@ -60,8 +81,8 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
                 var module = await GetModuleAsync(cancellationToken);
                 _dotNetRef ??= DotNetObjectReference.Create(this);
 
-                var state = await module.InvokeAsync<ThemeState>("init", cancellationToken, DefaultStorageKey, _dotNetRef);
-                ApplyState(ParseMode(state.Mode), ParseResolved(state.Resolved));
+                var state = await module.InvokeAsync<ThemeState?>("init", cancellationToken, DefaultStorageKey, _dotNetRef);
+                ApplyState(ParseMode(state?.Mode), ParseResolved(state?.Resolved));
                 _initialized = true;
             }
             catch (InvalidOperationException)
@@ -80,15 +101,30 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Auto-initializes: if <see cref="InitializeAsync"/> has not completed, it is awaited first.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The service has been disposed.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="mode"/> is not a defined <see cref="ThemeMode"/> value.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async Task SetModeAsync(ThemeMode mode, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        if (!Enum.IsDefined(mode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown ThemeMode.");
+        }
+
+        await EnsureInitializedAsync(cancellationToken);
+
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
             var module = await GetModuleAsync(cancellationToken);
-            var resolved = await module.InvokeAsync<string>("setMode", cancellationToken, DefaultStorageKey, ToJsValue(mode));
+            var resolved = await module.InvokeAsync<string?>("setMode", cancellationToken, DefaultStorageKey, ToJsValue(mode));
             ApplyState(mode, ParseResolved(resolved));
         }
         finally
@@ -98,10 +134,27 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
     }
 
     /// <inheritdoc />
-    public Task ToggleAsync(CancellationToken cancellationToken = default) =>
-        SetModeAsync(Resolved == ThemeMode.Dark ? ThemeMode.Light : ThemeMode.Dark, cancellationToken);
+    /// <remarks>
+    /// Auto-initializes, so the toggle is based on the stored scheme rather than the pre-init default.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The service has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    public async Task ToggleAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
 
-    /// <summary>Called from <c>theme.js</c> when the OS color scheme changes.</summary>
+        await EnsureInitializedAsync(cancellationToken);
+
+        await SetModeAsync(Resolved == ThemeMode.Dark ? ThemeMode.Light : ThemeMode.Dark, cancellationToken);
+    }
+
+    /// <summary>
+    /// Called by <c>theme.js</c> through a <see cref="DotNetObjectReference{T}"/> when the OS color scheme changes.
+    /// </summary>
+    /// <remarks>
+    /// For JS use only. Do not call this from C# code; use <see cref="SetModeAsync"/> to change the preference.
+    /// It is public only because the JS interop requires it.
+    /// </remarks>
     /// <param name="isDark">Whether the OS now prefers the dark scheme.</param>
     [JSInvokable]
     public void OnSystemSchemeChanged(bool isDark)
@@ -115,6 +168,10 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
     }
 
     /// <summary>Releases the JS module, unsubscribes the OS listener and disposes the .NET callback reference.</summary>
+    /// <remarks>
+    /// Idempotent. After disposal, <see cref="InitializeAsync"/>, <see cref="SetModeAsync"/> and
+    /// <see cref="ToggleAsync"/> throw <see cref="ObjectDisposedException"/>.
+    /// </remarks>
     /// <returns>A task that completes when cleanup has finished.</returns>
     public async ValueTask DisposeAsync()
     {
@@ -158,6 +215,14 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
         _gate.Dispose();
     }
 
+    private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
+    {
+        if (!_initialized)
+        {
+            await InitializeAsync(cancellationToken);
+        }
+    }
+
     private async Task<IJSObjectReference> GetModuleAsync(CancellationToken cancellationToken)
     {
         _module ??= await _js.InvokeAsync<IJSObjectReference>("import", cancellationToken, _modulePath);
@@ -177,6 +242,7 @@ public sealed class ThemeService : IThemeService, IAsyncDisposable
         ResolvedChanged?.Invoke(resolved);
     }
 
+    // JS data is untrusted: anything other than a known value falls back to the defaults instead of throwing.
     private static ThemeMode ParseMode(string? value) => value switch
     {
         "light" => ThemeMode.Light,
